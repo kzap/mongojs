@@ -3,24 +3,23 @@ var toMongodbCore = require('to-mongodb-core');
 var parse = require('parse-mongo-url');
 var Database = require('./lib/database');
 var getTopology = require('./lib/get-topology');
+var connect = require('./lib/connect');
 var bson = require('mongodb-core').BSON;
 
-var getDbName = function(connString) {
-  if (typeof connString !== 'string') return null;
-  var config = parse(connString);
-  return config.dbName;
-};
-
 module.exports = function(connString, cols) {
-  var dbname = getDbName(connString);
-  var onserver = thunky(function(cb) {
-    getTopology(connString, function(err, topology) {
-      if (err) return cb(err);
-      cb(null, topology);
-    });
-  });
+  var dbname ;
+  var onserver;
+  var server;
 
-  if (!dbname) {
+  if (isConnectionString(connString)) {
+    server = getTopology(parse(connString));
+    var config = parse(connString);
+    dbname = config.dbName;
+
+    onserver = thunky(connect.bind(null, server, config));
+  } else {
+    server = connString;
+
     dbname = connString._dbname;
     onserver = thunky(function(cb) {
       toMongodbCore(connString, function(err, server) {
@@ -30,7 +29,7 @@ module.exports = function(connString, cols) {
     });
   }
 
-  var that = new Database({name: dbname, cols: cols}, onserver);
+  var that = new Database({name: dbname, cols: cols}, server, onserver);
   if (typeof Proxy !== 'undefined') {
     var p = Proxy.create({
       get: function(obj, prop) {
@@ -41,8 +40,15 @@ module.exports = function(connString, cols) {
     });
 
     return p;
-  };
+  }
+
   return that;
 };
+
+function isConnectionString(connString) {
+  if (typeof connString !== 'string') return false;
+  var config = parse(connString);
+  return (config.dbName)?true:false;
+}
 
 module.exports.ObjectId = bson.ObjectId;
